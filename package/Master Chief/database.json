@@ -1,0 +1,24 @@
+{
+  "format_version": 2,
+  "target": {
+    "database": "media/stripped/gamedbRC.slt",
+    "base_sha256": "4d50013dc7705de05a074e4421679e16a3a1eda0816841861b0b7139ecf45517"
+  },
+  "policy": {
+    "id_conflicts": "nearest",
+    "update_conflicts": "last_wins"
+  },
+  "tables": {
+    "DriverModels": {
+      "key": [
+        "Id"
+      ],
+      "insert": [
+        {
+          "Id": 2,
+          "MediaName": "MasterChief"
+        }
+      ]
+    }
+  }
+}

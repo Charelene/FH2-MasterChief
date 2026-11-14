@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "id": "local-masterchief",
+  "name": "Master Chief",
+  "author": "Charelene",
+  "version": "1.0.0",
+  "description": "Master Chief as a Player Character, ported from Forza Horizon 6's outfit.",
+  "database": "database.json",
+  "media": "media",
+  "dependencies": []
+}

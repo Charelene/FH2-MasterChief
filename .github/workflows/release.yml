@@ -1,0 +1,108 @@
+name: Release
+
+# Builds MasterChief.zip (the Extra Options package: package/Master Chief + the model) and publishes it as a release.
+#
+#   Release:  git tag v1.0.0 && git push origin v1.0.0
+#             or Actions > Release > Run workflow, with a version (empty = build only, the zip is kept as an artifact)
+#
+# The model is downloaded from the repository variable MODEL_URL (Settings > Secrets and variables > Actions >
+# Variables), or from the default below. It can be either the driver zip itself (driver.modelbin at its root) or a
+# whole package zip that holds media/drivers/MasterChief.zip. Set MODEL_SHA256 too to have the download checked.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. 1.0.1 (leave empty to only test the build)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build and publish MasterChief.zip
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      MODEL_URL: ${{ vars.MODEL_URL || 'https://forza.scuffed.af/media/forza-mirror/MasterChief-model.zip' }}
+      MODEL_SHA256: ${{ vars.MODEL_SHA256 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Work out the version
+        id: ver
+        run: |
+          v="${{ github.event.inputs.version || github.ref_name }}"
+          v="${v#v}"
+          case "$v" in ""|main|master) v="0.0.0" ;; esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Download the model
+        run: |
+          curl -fsSL --retry 3 -o model.zip "$MODEL_URL"
+          if [ -n "$MODEL_SHA256" ]; then
+            echo "$MODEL_SHA256  model.zip" | sha256sum -c -
+          fi
+          sha256sum model.zip
+
+      - name: Assemble the package
+        run: |
+          pkg="pkg/Master Chief"
+          mkdir -p "$pkg/media/drivers"
+          cp -r "package/Master Chief/." "$pkg/"
+          if unzip -Z1 model.zip | grep -qx 'driver.modelbin'; then
+            cp model.zip "$pkg/media/drivers/MasterChief.zip"
+          else
+            inner=$(unzip -Z1 model.zip | grep -i 'media/drivers/MasterChief\.zip$' | head -1)
+            if [ -z "$inner" ]; then
+              echo "::error::$MODEL_URL has neither driver.modelbin at its root nor media/drivers/MasterChief.zip"
+              unzip -Z1 model.zip | head -20
+              exit 1
+            fi
+            unzip -p model.zip "$inner" > "$pkg/media/drivers/MasterChief.zip"
+          fi
+          unzip -Z1 "$pkg/media/drivers/MasterChief.zip" | grep -qx 'driver.modelbin' \
+            || { echo "::error::the driver zip has no driver.modelbin"; exit 1; }
+          jq --arg v "${{ steps.ver.outputs.version }}" '.version = $v' "$pkg/mod.json" > mod.json.tmp
+          mv mod.json.tmp "$pkg/mod.json"
+
+      - name: Zip
+        run: |
+          (cd pkg && zip -r -X ../MasterChief.zip "Master Chief")
+          sha256sum MasterChief.zip > SHA256SUMS
+          unzip -l MasterChief.zip
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: MasterChief
+          path: |
+            MasterChief.zip
+            SHA256SUMS
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', github.event.inputs.version) }}"
+          cat > notes.md <<'EOF'
+          Download **MasterChief.zip**, unzip it into `<your Azimuth folder>\mods\Forza Horizon 2`, and add a line
+          `Master Chief` to `loadorder.txt` in that folder. Then pick **MasterChief** in Options > Player Character.
+          Step by step: see the [README](https://github.com/Charelene/FH2-MasterChief#install).
+
+          Needs Forza Horizon 2 on Azimuth with FH2 Extra Options 0.6.0.
+          EOF
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" MasterChief.zip SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" MasterChief.zip SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Master Chief $tag" \
+              --notes-file notes.md
+          fi
